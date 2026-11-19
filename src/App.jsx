@@ -589,6 +589,12 @@ async function cargarProfesionalesReales() {
     setCargandoProfesionales(false);
   }
 }
+useEffect(() => {
+  if (pantalla === "catalogo") {
+    cargarProfesionalesReales();
+  }
+}, [pantalla]);
+
 async function cargarMisSolicitudes() {
   setCargandoMisSolicitudes(true);
   setMensajeMisSolicitudes("");
@@ -760,11 +766,11 @@ async function validarFormulario(evento) {
 
   if (!datos.correo.trim()) {
   nuevosErrores.correo = "Escribe tu correo electrónico.";
-} else if (
-  !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.correo.trim())
-) {
-  nuevosErrores.correo = "Escribe un correo electrónico válido.";
-}
+  } else if (
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.correo.trim())
+  ) {
+    nuevosErrores.correo = "Escribe un correo electrónico válido.";
+  }
   
   if (!datos.telefono.trim()) {
     nuevosErrores.telefono = "Escribe tu número de celular.";
@@ -856,6 +862,7 @@ if (data.user && data.session) {
   );
 }
 } 
+
 async function iniciarSesion(evento) {
   evento.preventDefault();
 
@@ -885,7 +892,6 @@ async function iniciarSesion(evento) {
           "No fue posible ingresar. Verifica tu correo y contraseña."
         );
       }
-
       return;
     }
 
@@ -896,17 +902,80 @@ async function iniciarSesion(evento) {
       return;
     }
 
-    
-const { data: perfilCuenta, error: errorCuenta } =
-  await supabase
-    .from("profiles")
-    .select("full_name, phone, locality, role")
-    .eq("id", data.user.id)
-    .maybeSingle();
+    const { data: perfilCuenta, error: errorCuenta } =
+      await supabase
+        .from("profiles")
+        .select("full_name, phone, locality, role")
+        .eq("id", data.user.id)
+        .maybeSingle();
 
-if (errorCuenta) {
-  console.error("Error consultando el perfil:", errorCuenta);
+    if (errorCuenta) {
+      console.error("Error consultando el perfil:", errorCuenta);
+    }
+
+    const rolUsuario =
+      perfilCuenta?.role ||
+      data.user.user_metadata?.role ||
+      "";
+
+    const rolNormalizado = rolUsuario.toLowerCase();
+
+    if (["worker", "trabajador"].includes(rolNormalizado)) {
+      const { data: perfilPublico, error: errorPublico } =
+        await supabase
+          .from("worker_public_profiles")
+          .select("public_name, locality, bio, experience_years, photo_url")
+          .eq("user_id", data.user.id)
+          .maybeSingle();
+
+      if (errorPublico) {
+        console.error(
+          "Error consultando perfil profesional:",
+          errorPublico
+        );
+      }
+
+      setPerfilTrabajador({
+        nombre:
+          perfilCuenta?.full_name ||
+          perfilPublico?.public_name ||
+          "",
+        telefono: perfilCuenta?.phone || "",
+        localidad:
+          perfilPublico?.locality ||
+          perfilCuenta?.locality ||
+          "",
+        experiencia:
+          perfilPublico?.experience_years != null
+            ? String(perfilPublico.experience_years)
+            : "",
+        descripcion: perfilPublico?.bio || ""
+      });
+
+      setFotoTrabajador(perfilPublico?.photo_url || "");
+      setArchivoFoto(null);
+      setMensaje("¡Bienvenido a tu espacio profesional!");
+      setPantalla("panelTrabajador");
+
+    } else if (["client", "cliente"].includes(rolNormalizado)) {
+      setMensaje("¡Bienvenido nuevamente a SOLUCIONA!");
+      setPantalla("catalogo");
+
+    } else {
+      setMensaje(
+        "No pudimos identificar el tipo de cuenta. Verifica el rol de tu perfil."
+      );
+    }
+
+  } catch (error) {
+    console.error("Error al iniciar sesión:", error);
+    setMensaje(
+      "Ocurrió un problema al ingresar. Inténtalo nuevamente."
+    );
+  }
 }
+
+// RECUPERAR CONTRASEÑA
 async function enviarCorreoRecuperacion(evento) {
   evento.preventDefault();
 
@@ -931,134 +1000,24 @@ async function enviarCorreoRecuperacion(evento) {
     setMensajeRecuperacion(
       "Si el correo está registrado, recibirás un enlace para recuperar tu contraseña. Revisa también la carpeta de correo no deseado."
     );
+
   } catch (error) {
-    setMensajeRecuperacion("No fue posible enviar el correo: " + error.message);
+    setMensajeRecuperacion(
+      "No fue posible enviar el correo: " + error.message
+    );
   } finally {
     setCargandoRecuperacion(false);
   }
 }
 
-{pantalla === "recuperarPassword" && (
-  <section className="seccion-formulario">
-    <button
-      className="volver"
-      onClick={() => {
-        setMensajeRecuperacion("");
-        setPantalla("login");
-      }}
-    >
-      <ArrowLeft size={18} /> Volver al inicio de sesión
-    </button>
-
-    <div className="formulario-contenedor">
-      <div className="etiqueta">
-        <ShieldCheck size={16} />
-        RECUPERAR CUENTA
-      </div>
-
-      <h1 className="titulo-formulario">
-        ¿Olvidaste tu contraseña?
-      </h1>
-
-      <p className="descripcion">
-        Escribe el correo electrónico con el que te registraste.
-        Te enviaremos un enlace para crear una nueva contraseña.
-      </p>
-
-      <form onSubmit={enviarCorreoRecuperacion} noValidate>
-        <label>Correo electrónico *</label>
-
-        <input
-          type="email"
-          value={correoRecuperacion}
-          onChange={(evento) =>
-            setCorreoRecuperacion(evento.target.value)
-          }
-          placeholder="ejemplo@correo.com"
-          required
-        />
-
-        <button
-          className="boton-principal"
-          type="submit"
-          disabled={cargandoRecuperacion}
-        >
-          {cargandoRecuperacion
-            ? "Enviando..."
-            : "Enviar enlace de recuperación"}
-        </button>
-
-        {mensajeRecuperacion && (
-          <div className="mensaje-formulario" role="status">
-            {mensajeRecuperacion}
-          </div>
-        )}
-      </form>
-    </div>
-  </section>
-)}
-
-
-{pantalla === "nuevaPassword" && (
-  <section className="seccion-formulario">
-    <div className="formulario-contenedor">
-      <div className="etiqueta">
-        <ShieldCheck size={16} />
-        NUEVA CONTRASEÑA
-      </div>
-
-      <h1 className="titulo-formulario">
-        Crea una nueva contraseña
-      </h1>
-
-      <p className="descripcion">
-        Elige una contraseña segura para continuar utilizando SOLUCIONA.
-      </p>
-
-      <form onSubmit={actualizarPassword} noValidate>
-        <label>Nueva contraseña *</label>
-
-        <input
-          type="password"
-          value={nuevaPassword}
-          onChange={(evento) => setNuevaPassword(evento.target.value)}
-          placeholder="Mínimo 6 caracteres"
-          required
-        />
-
-        <label>Confirmar contraseña *</label>
-
-        <input
-          type="password"
-          value={confirmarPassword}
-          onChange={(evento) => setConfirmarPassword(evento.target.value)}
-          placeholder="Escribe nuevamente tu contraseña"
-          required
-        />
-
-        <button
-          className="boton-principal"
-          type="submit"
-          disabled={cargandoRecuperacion}
-        >
-          {cargandoRecuperacion ? "Guardando..." : "Guardar nueva contraseña"}
-        </button>
-
-        {mensajeRecuperacion && (
-          <div className="mensaje-formulario" role="status">
-            {mensajeRecuperacion}
-          </div>
-        )}
-      </form>
-    </div>
-  </section>
-)}
-
+// ACTUALIZAR CONTRASEÑA
 async function actualizarPassword(evento) {
   evento.preventDefault();
 
   if (nuevaPassword.length < 6) {
-    setMensajeRecuperacion("La contraseña debe tener al menos 6 caracteres.");
+    setMensajeRecuperacion(
+      "La contraseña debe tener al menos 6 caracteres."
+    );
     return;
   }
 
@@ -1076,80 +1035,25 @@ async function actualizarPassword(evento) {
 
     if (error) throw error;
 
-    setMensajeRecuperacion("¡Tu contraseña fue actualizada correctamente!");
+    setMensajeRecuperacion(
+      "¡Tu contraseña fue actualizada correctamente!"
+    );
+
     setNuevaPassword("");
     setConfirmarPassword("");
 
     await supabase.auth.signOut();
     setPantalla("login");
+
   } catch (error) {
-    setMensajeRecuperacion("No fue posible cambiar la contraseña: " + error.message);
+    setMensajeRecuperacion(
+      "No fue posible cambiar la contraseña: " + error.message
+    );
   } finally {
     setCargandoRecuperacion(false);
   }
 }
 
-const rolUsuario =
-  perfilCuenta?.role ||
-  data.user.user_metadata?.role ||
-  "";
-
-const rolNormalizado = rolUsuario.toLowerCase();
-
-if (["worker", "trabajador"].includes(rolNormalizado)) {
-
-  const { data: perfilPublico, error: errorPublico } =
-    await supabase
-      .from("worker_public_profiles")
-      .select("public_name, locality, bio, experience_years, photo_url")
-      .eq("user_id", data.user.id)
-      .maybeSingle();
-
-  if (errorPublico) {
-    console.error("Error consultando perfil profesional:", errorPublico);
-  }
-
-  setPerfilTrabajador({
-    nombre:
-      perfilCuenta?.full_name ||
-      perfilPublico?.public_name ||
-      "",
-    telefono: perfilCuenta?.phone || "",
-    localidad:
-      perfilPublico?.locality ||
-      perfilCuenta?.locality ||
-      "",
-    experiencia:
-      perfilPublico?.experience_years != null
-        ? String(perfilPublico.experience_years)
-        : "",
-    descripcion: perfilPublico?.bio || ""
-  });
-
-  setFotoTrabajador(perfilPublico?.photo_url || "");
-  setArchivoFoto(null);
-  setMensaje("¡Bienvenido a tu espacio profesional!");
-  setPantalla("panelTrabajador");
-
-} else if (["client", "cliente"].includes(rolNormalizado)) {
-
-  setMensaje("¡Bienvenido nuevamente a SOLUCIONA!");
-  setPantalla("catalogo");
-
-} else {
-  setMensaje(
-    "No pudimos identificar el tipo de cuenta. Verifica el rol de tu perfil."
-  );
-}
-
-  } catch (error) {
-    console.error("Error al iniciar sesión:", error);
-
-    setMensaje(
-      "Ocurrió un problema al ingresar. Inténtalo nuevamente."
-    );
-  }
-}
 useEffect(() => {
   if (
     pantalla !== "catalogo" &&
@@ -1247,6 +1151,7 @@ Encuentra profesionales para tu hogar o da a conocer los servicios que ofreces. 
   <p>¿Ya tienes una cuenta en SOLUCIONA?</p>
 
   <button
+
   className="boton-principal"
   onClick={() => {
     setMensaje("");
@@ -1348,6 +1253,19 @@ Encuentra profesionales para tu hogar o da a conocer los servicios que ofreces. 
           required
         />
 
+        <div className="recuperar-enlace">
+          <button
+            type="button"
+            onClick={() => {
+              setCorreoRecuperacion(loginData.correo);
+              setMensajeRecuperacion("");
+              setPantalla("recuperarPassword");
+            }}
+          >
+            ¿Olvidaste tu contraseña?
+          </button>
+        </div>
+
         <button
           className="boton-principal"
           type="submit"
@@ -1384,6 +1302,7 @@ Encuentra profesionales para tu hogar o da a conocer los servicios que ofreces. 
   </section>
 )}
 {pantalla === "confirmarCorreo" && (
+  
   <section className="seccion-formulario">
     <div className="formulario-contenedor">
 
@@ -1423,6 +1342,126 @@ Encuentra profesionales para tu hogar o da a conocer los servicios que ofreces. 
         Volver al inicio
         <ArrowRight size={18} />
       </button>
+      </div>
+        </section>
+      )}
+{pantalla === "recuperarPassword" && (
+  <section className="seccion-formulario">
+    <button
+
+      className="volver"
+      onClick={() => {
+        setMensajeRecuperacion("");
+        setPantalla("login");
+      }}
+    >
+      <ArrowLeft size={18} /> Volver al inicio de sesión
+    </button>
+
+    <div className="formulario-contenedor">
+      <div className="etiqueta">
+        <ShieldCheck size={16} />
+        RECUPERAR CUENTA
+      </div>
+
+      <h1 className="titulo-formulario">
+        ¿Olvidaste tu contraseña?
+      </h1>
+
+      <p className="descripcion">
+        Escribe el correo electrónico con el que te registraste.
+        Te enviaremos un enlace para crear una nueva contraseña.
+      </p>
+
+      <form onSubmit={enviarCorreoRecuperacion} noValidate>
+        <label>Correo electrónico *</label>
+
+        <input
+          type="email"
+          value={correoRecuperacion}
+          onChange={(evento) =>
+            setCorreoRecuperacion(evento.target.value)
+          }
+          placeholder="ejemplo@correo.com"
+          required
+        />
+
+        <button
+          className="boton-principal"
+          type="submit"
+          disabled={cargandoRecuperacion}
+        >
+          {cargandoRecuperacion
+            ? "Enviando..."
+            : "Enviar enlace de recuperación"}
+        </button>
+
+        {mensajeRecuperacion && (
+          <div className="mensaje-formulario" role="status">
+            {mensajeRecuperacion}
+          </div>
+        )}
+      </form>
+{pantalla === "nuevaPassword" && (
+  <section className="seccion-formulario">
+    <div className="formulario-contenedor">
+      <div className="etiqueta">
+        <ShieldCheck size={16} />
+        NUEVA CONTRASEÑA
+      </div>
+
+      <h1 className="titulo-formulario">
+        Crea una nueva contraseña
+      </h1>
+
+      <p className="descripcion">
+        Elige una contraseña segura para continuar utilizando SOLUCIONA.
+      </p>
+
+      <form onSubmit={actualizarPassword} noValidate>
+        <label>Nueva contraseña *</label>
+
+        <input
+          type="password"
+          value={nuevaPassword}
+          onChange={(evento) =>
+            setNuevaPassword(evento.target.value)
+          }
+          placeholder="Mínimo 6 caracteres"
+          required
+        />
+
+        <label>Confirmar contraseña *</label>
+
+        <input
+          type="password"
+          value={confirmarPassword}
+          onChange={(evento) =>
+            setConfirmarPassword(evento.target.value)
+          }
+          placeholder="Escribe nuevamente tu contraseña"
+          required
+        />
+
+        <button
+          className="boton-principal"
+          type="submit"
+          disabled={cargandoRecuperacion}
+        >
+          {cargandoRecuperacion
+            ? "Guardando..."
+            : "Guardar nueva contraseña"}
+        </button>
+
+        {mensajeRecuperacion && (
+          <div className="mensaje-formulario" role="status">
+            {mensajeRecuperacion}
+          </div>
+        )}
+      </form>
+    </div>
+  </section>
+)}
 
     </div>
   </section>
@@ -1530,18 +1569,6 @@ Encuentra profesionales para tu hogar o da a conocer los servicios que ofreces. 
           onChange={actualizarCampo}
           placeholder="Escribe nuevamente tu contraseña"
         />
-        <div className="recuperar-enlace">
-          <button
-            type="button"
-            onClick={() => {
-              setCorreoRecuperacion(loginData.correo);
-              setMensajeRecuperacion("");
-              setPantalla("recuperarPassword");
-            }}
-          >
-            ¿Olvidaste tu contraseña?
-          </button>
-        </div>
         {errores.confirmarPassword && (
           <small className="error">{errores.confirmarPassword}</small>
         )}
